@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>深求图标 白边方案预览</title>
+<style>
+  *{box-sizing:border-box;margin:0}
+  body{font-family:Segoe UI,system-ui,sans-serif;background:#0f0f14;color:#e6e6ea;
+    padding:40px 48px}
+  h1{font-size:20px;margin-bottom:6px}
+  p.sub{color:#9a9aa5;font-size:13px;margin-bottom:28px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:24px}
+  .card{background:#1a1a22;border:1px solid #2a2a36;border-radius:12px;padding:20px 16px 14px;
+    text-align:center;display:flex;flex-direction:column;align-items:center}
+  .label{font-size:13px;font-weight:600;margin-bottom:14px}
+  .desc{font-size:11px;color:#9a9aa5;margin-top:14px;line-height:1.5}
+  .stage{width:96px;height:96px;border-radius:14px;background:#ffffff;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+  .stage img{display:block;width:100%;height:100%;object-fit:cover}
+  .tag{font-size:10px;color:#c9a24c;background:#2a2320;border:1px solid #5a4a2e;
+    padding:2px 8px;border-radius:999px;margin-top:12px}
+  .foot{margin-top:36px;font-size:12px;color:#9a9aa5;line-height:1.6}
+  code{background:#25252f;padding:1px 6px;border-radius:4px;color:#d6d6e0}
+</style>
+</head>
+<body>
+  <h1>深求（DeepSeek）圈logo 白边方案预览</h1>
+  <p class="sub">基准：当前圆角 icon.png（256px，圆角裁切）。几种白边处理，看哪种顺眼。</p>
+
+  <div class="grid">
+    <!-- A 原版 -->
+    <div class="card">
+      <div class="label">A · 原版（无白边）</div>
+      <div class="stage"><img src="icon.png"></div>
+      <div class="tag">当前</div>
+      <div class="desc">直接显示圆角图标，logo 填满</div>
+    </div>
+
+    <!-- B 四周紧贴白边 -->
+    <div class="card">
+      <div class="label">B · 紧贴白边</div>
+      <div class="stage" style="padding:6px;border-radius:18px">
+        <img src="icon.png" style="border-radius:14px">
+      </div>
+      <div class="tag">近似方案</div>
+      <div class="desc">白色 padding 压在 logo 四周，logo 略缩小</div>
+    </div>
+
+    <!-- C 稍宽白边 -->
+    <div class="card">
+      <div class="label">C · 稍宽白边</div>
+      <div class="stage" style="padding:14px;border-radius:22px">
+        <img src="icon.png" style="border-radius:14px">
+      </div>
+      <div class="tag">近似方案</div>
+      <div class="desc">更宽的白边让 logo 明显缩小居中</div>
+    </div>
+
+    <!-- D 白边+白圆角块 -->
+    <div class="card">
+      <div class="label">D · 白底圆角块</div>
+      <div class="stage" style="padding:16px;border-radius:24px">
+        <img src="icon.png" style="border-radius:0">
+      </div>
+      <div class="tag">近似方案</div>
+      <div class="desc">图标保持方形内容，外面白边形成圆角白块</div>
+    </div>
+
+    <!-- E 细白描边 -->
+    <div class="card">
+      <div class="label">E · 细白描边</div>
+      <div class="stage" style="padding:0;border-radius:16px;overflow:hidden">
+        <img src="icon.png" style="outline:2px solid #fff;outline-offset:-2px">
+      </div>
+      <div class="tag">近似方案</div>
+      <div class="desc">只在边缘加一圈细白线，logo 尺寸几乎不变</div>
+    </div>
+
+    <!-- F 简单白框 -->
+    <div class="card">
+      <div class="label">F · 白框（Border）</div>
+      <div class="stage" style="padding:0;border-radius:16px;overflow:hidden">
+        <img src="icon.png" style="border:5px solid #fff">
+      </div>
+      <div class="tag">近似方案</div>
+      <div class="desc">外圈白 border，方形白边包裹圆角图</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    说明：这些是 <b>CSS 模拟</b>，用于先看观感。确定方案后我会用 sharp 真正在打包图标（icon.png / icon.ico）
+    上生成白边（例如 <code>resize → 白底画布 → 圆角 → 合成</code>），并重新打包。<br>
+    想调整白边宽度 / 是否圆角 / logo 缩小比例，直接告诉我（如 “C 宽白边，圆角 24px”）。
+  </div>
+</body>
+</html>

@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+*.log
+
+# Local/session artifacts (contains real session data — never publish)
+dev/session-backup/
