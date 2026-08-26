@@ -1,65 +1,68 @@
 # DSH Desktop Shell
 
-A lightweight, native desktop launcher for the DSH WebUI. It wraps the web interface
-in a single Electron window so you don't need a browser tab.
+> 轻量、原生、**不绑定任何插件**的 DSH WebUI 桌面启动器。
 
-**Plugin-free by design.** The shell binds nothing — no bundled plugins, no extra
-dependencies, no configuration layer. It simply loads the DSH WebUI like a browser
-does, so every DSH plugin keeps working exactly as it does in the browser, and the
-shell itself stays small and native.
+把 DSH WebUI 装进一个原生 Electron 窗口，让你不必再开一个浏览器标签页。
 
-## Features
+**[简体中文](README.md) | [English](README.en.md)**
 
-- Native window with a clean title bar (icon + brand only)
-- Automatic retry if the DSH server isn't ready yet
-- External links open in your system browser
-- Keyboard shortcuts: `Ctrl+R` (reload), `F12` (devtools), `Ctrl+Q` (quit)
-- Zoom support (`Ctrl+` / `Ctrl-`)
-- Single-instance: launching again just focuses the existing window
-- Only stops the DSH server it spawned itself — never force-kills a server another
-  instance or an external process is using
+---
 
-## Quick Start
+## 插件无关（Plugin-free by design）
+
+这个壳不绑定任何东西：**不捆绑插件、不引入额外依赖、不需要任何配置层**。它就像浏览器一样直接加载 DSH WebUI，因此每一个 DSH 插件都能像在浏览器里那样正常运作——而壳本身始终轻巧、保持原生。
+
+## 特性
+
+- 原生窗口，标题栏干净（仅图标 + 品牌名）
+- DSH 服务器未就绪时自动重试
+- 外链用系统浏览器打开
+- 快捷键：`Ctrl+R` 刷新、`F12` 开发者工具、`Ctrl+Q` 退出
+- 缩放：`Ctrl+` / `Ctrl-`
+- **单实例**：再次启动只会聚焦已有窗口，不会重复拉起共享的 DSH 服务
+- 只停止**本实例自己**拉起的 DSH 服务器；绝不强杀其它实例或外部进程正在使用的服务器
+
+## 快速开始
 
 ```bash
-# Install dependencies (first time only)
+# 首次安装依赖
 npm install
 
-# Launch
+# 启动
 npm start
 
-# Or just double-click start.bat
+# 或直接双击 start.bat
 ```
 
-## Configuration
+## 配置
 
-| Environment Variable | Default                  | Description              |
-| -------------------- | ------------------------ | ------------------------ |
-| `DSH_URL`            | `http://127.0.0.1:3080` | The DSH WebUI URL to load |
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DSH_URL` | `http://127.0.0.1:3080` | DSH WebUI 的地址 |
 
-Example with a custom URL:
+自定义地址示例：
 
 ```bash
 set DSH_URL=http://localhost:4000
 npm start
 ```
 
-## Development
+## 开发
 
 ```bash
 npm run dev
 ```
 
-This launches the app with DevTools open for debugging.
+带开发者工具启动，便于调试。
 
-## Build
+## 构建
 
 ```bash
-npm run build      # NSIS installer (win x64)
+npm run build        # NSIS 安装包 (win x64)
 npm run build:portable
 npm run build:nsis
 ```
 
-## License
+## 许可证
 
 [MIT](LICENSE)
