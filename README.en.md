@@ -16,6 +16,7 @@ The shell binds nothing: **no bundled plugins, no extra dependencies, no configu
 
 - Native window with a clean title bar (icon + brand only)
 - Automatic retry if the DSH server isn't ready yet
+- **Native picker raised to the front**: the Windows "Select Workspace Directory" dialog, which DSH opens from a background process, is automatically brought to the foreground, centered over the main window and adopted as its owned dialog — no more hiding behind the interface
 - External links open in your system browser
 - Shortcuts: `Ctrl+R` reload, `F12` devtools, `Ctrl+Q` quit
 - Zoom: `Ctrl+` / `Ctrl-`

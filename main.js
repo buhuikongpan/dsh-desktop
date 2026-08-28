@@ -3,6 +3,7 @@ const { execSync, exec, spawn } = require('child_process')
 const path = require('path')
 const http = require('http')
 const https = require('https')
+const { buildEncodedCommand } = require('./dialog-watcher')
 
 // DSH WebUI URL
 const DSH_URL = process.env.DSH_URL || 'http://127.0.0.1:3080'
@@ -543,6 +544,33 @@ function hiddenClose(win) {
   try { win.destroy() } catch { /* already gone */ }
 }
 
+// ── Native dialog foreground fixer ──────────────────────────────────
+
+// Hidden PowerShell process that pulls the DSH native folder picker to the
+// front whenever DSH opens it (see dialog-watcher.js for why it's needed).
+let dlgWatcherChild = null
+
+function stopDialogWatcher() {
+  const child = dlgWatcherChild
+  dlgWatcherChild = null
+  if (!child || !child.pid) return
+  try {
+    execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore', timeout: 5000 })
+  } catch { /* already gone */ }
+}
+
+function startDialogWatcher() {
+  if (process.platform !== 'win32') return
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  stopDialogWatcher()
+  const hwnd = mainWindow.getNativeWindowHandle().readBigUInt64LE(0)
+  dlgWatcherChild = spawn('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-EncodedCommand', buildEncodedCommand(hwnd, process.pid),
+  ], { windowsHide: true, stdio: 'ignore' })
+  dlgWatcherChild.unref()
+}
+
 // ── Main window ─────────────────────────────────────────────────────
 
 function createWindow() {
@@ -570,6 +598,9 @@ function createWindow() {
   })
 
   mainWindow.loadURL(DSH_URL)
+
+  // Watch for DSH's native folder picker and keep it in front of this window.
+  startDialogWatcher()
 
   const isLocalUrl = (url) => url.includes('127.0.0.1') || url.includes('localhost')
 
@@ -741,7 +772,10 @@ if (!gotLock) {
   // Stop only the server we spawned. `will-quit` also catches quit paths that
   // never opened a window (e.g. a startup failure after the server was spawned),
   // which would otherwise leak that process.
-  app.on('will-quit', () => stopDshServer())
+  app.on('will-quit', () => {
+    stopDialogWatcher()
+    stopDshServer()
+  })
 
   // Windows: closing the last window ends the app. Tear down only the DSH
   // server we own — never force-kill whatever happens to hold the port (an

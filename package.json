@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop-shell",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DSH Desktop Shell - A native launcher for the DSH WebUI",
   "main": "main.js",
   "scripts": {
@@ -25,6 +25,7 @@
     },
     "files": [
       "main.js",
+      "dialog-watcher.js",
       "preload.js",
       "progress-preload.js",
       "icon.png"
@@ -34,7 +35,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -48,7 +51,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "DSH Desktop",
-      "installerLanguages": ["zh_CN", "en_US"]
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ]
     }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "electron-winstaller@5.4.0": true
   }
 }
