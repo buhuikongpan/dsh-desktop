@@ -3,6 +3,7 @@ const { execSync, exec, spawn } = require('child_process')
 const path = require('path')
 const http = require('http')
 const https = require('https')
+const readline = require('readline')
 const { buildEncodedCommand } = require('./dialog-watcher')
 
 // DSH WebUI URL
@@ -250,6 +251,47 @@ function updateDsh(version, onOutput) {
 // The DSH web server child we spawned (so we can stop it when the app quits).
 let dshServerChild = null
 
+// The tokenized WebUI URL (http://127.0.0.1:PORT/?token=...) printed by
+// `dsh web`. dsh web requires this token to establish the auth cookie before
+// the real UI is served; loading the bare base URL yields a 401
+// "authentication required" gate, not the app. We capture it from the child's
+// stdout/stderr so the window can complete the token->cookie exchange.
+let dshServerUrl = null
+
+// URL the desktop window should actually load. Falls back to the bare base
+// URL when no token has been captured yet (e.g. an external server we reused).
+function currentServerUrl() {
+  return dshServerUrl || DSH_URL
+}
+
+// Parse the tokenized WebUI URL out of a `dsh web` output line.
+// The canonical readiness line is exactly:
+//   dsh web: http://127.0.0.1:3080/?token=<...>
+// Three hard guards (instead of a loose regex over the raw stream):
+//   1. the line must start with the literal "dsh web:" prefix;
+//   2. the trailing token must parse as a real URL;
+//   3. it must share our base origin (scheme+port, host limited to
+//      127.0.0.1 / localhost / the configured host) and carry a `token`
+//      query parameter.
+// So banner links (gofastmcp.com, horizon.prefect.io…) or any foreign
+// "dsh web: https://evil…?token=…" line can never be accepted.
+function parseServerUrl(line) {
+  const text = String(line || '').trim()
+  const m = /^dsh web:\s*(\S+)\s*$/.exec(text)
+  if (!m) return null
+  return isServerUrl(m[1]) ? m[1] : null
+}
+
+function isServerUrl(url) {
+  let u
+  try { u = new URL(url) } catch { return false }
+  if (!u.searchParams.get('token')) return false
+  const base = new URL(DSH_URL)
+  if (u.protocol !== base.protocol || u.port !== base.port) return false
+  const host = u.hostname
+  return host === '127.0.0.1' || host === 'localhost' || host === base.hostname
+}
+
 // Start the DSH web server in the background, do not open a browser.
 // Keeps a handle so the app can shut it down together on quit.
 function startDshServer() {
@@ -257,9 +299,21 @@ function startDshServer() {
     const child = spawn('cmd.exe', ['/c', 'dsh', 'web', '--no-open'], {
       windowsHide: true,
       detached: false, // keep it tied to this app so it dies with it
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'], // capture stdout+stderr to read the token URL
     })
     dshServerChild = child
+    dshServerUrl = null
+    // readline handles arbitrary chunk boundaries (no half-line splits); scan
+    // stdout+stderr for the canonical "dsh web: <url>" line.
+    const onLine = (line) => {
+      if (dshServerUrl) return
+      const url = parseServerUrl(line)
+      if (url) dshServerUrl = url
+    }
+    const rlOut = readline.createInterface({ input: child.stdout })
+    const rlErr = readline.createInterface({ input: child.stderr })
+    rlOut.on('line', onLine)
+    rlErr.on('line', onLine)
     child.on('error', (err) => { dshServerChild = null; resolve(false) })
     child.on('exit', () => { if (dshServerChild === child) dshServerChild = null })
     child.unref()
@@ -332,6 +386,20 @@ function waitForServer(timeoutMs = 30000) {
   })
 }
 
+// Wait a moment for the tokenized URL `dsh web` prints at readiness, so the
+// window can complete the token->cookie exchange instead of hitting the 401
+// auth gate. Falls back to null (base URL) if it never appears.
+function waitForServerUrl(timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    if (dshServerUrl) return resolve(dshServerUrl)
+    const start = Date.now()
+    const t = setInterval(() => {
+      if (dshServerUrl) { clearInterval(t); return resolve(dshServerUrl) }
+      if (Date.now() - start > timeoutMs) { clearInterval(t); return resolve(null) }
+    }, 200)
+  })
+}
+
 // Manually clear a stale server (e.g. one left running from an external
 // `npm install -g` upgrade) and start a fresh one, then reload the window.
 async function restartDshServer() {
@@ -356,7 +424,7 @@ async function restartDshServer() {
     })
     return
   }
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(DSH_URL)
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(currentServerUrl())
 }
 
 // ── Startup dialog ──────────────────────────────────────────────────
@@ -597,7 +665,7 @@ function createWindow() {
     mainWindow.setTitle('DeepSeek Harness Desktop')
   })
 
-  mainWindow.loadURL(DSH_URL)
+  mainWindow.loadURL(currentServerUrl())
 
   // Watch for DSH's native folder picker and keep it in front of this window.
   startDialogWatcher()
@@ -665,7 +733,7 @@ function createWindow() {
       retryCount++
       showStatusPage('waiting')
       setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(DSH_URL)
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(currentServerUrl())
       }, 2000)
     } else {
       showStatusPage('error')
@@ -731,6 +799,9 @@ async function launch() {
       app.quit()
       return
     }
+    // Capture the tokenized URL (printed when the web UI is ready) before
+    // opening the window, so the auth cookie can be established.
+    await waitForServerUrl()
   }
 
   // 3. Server is up (already running or just started) → open the window.
@@ -741,7 +812,7 @@ async function launch() {
 ipcMain.on('dsh-desktop:quit', () => app.quit())
 ipcMain.on('dsh-desktop:retry', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.loadURL(DSH_URL)
+  mainWindow.loadURL(currentServerUrl())
 })
 
 // Constrain the app to a single instance. A slow launch must not spawn extra
