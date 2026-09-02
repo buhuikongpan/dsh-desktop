@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop-shell",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "DSH Desktop Shell - A native launcher for the DSH WebUI",
   "main": "main.js",
   "scripts": {

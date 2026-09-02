@@ -335,6 +335,59 @@ function stopDshServer() {
   } catch { /* already gone */ }
 }
 
+// ── Diagnostic / terminal helpers ──────────────────────────────────
+
+// Whitelist of diagnostic commands the error page may open in a dedicated
+// terminal. Only these exact keys resolve; anything else is ignored, so a
+// compromised/buggy page cannot make the shell run arbitrary input.
+const DIAGNOSTIC_COMMANDS = {
+  // show the DSH web server front and its real output
+  'dsh-web': 'dsh web',
+  // show what DSH version the shell currently sees
+  'dsh-version': 'dsh --version',
+}
+
+// Open a new console window that actually runs `command` and stays open, so
+// the user can read the raw output instead of a swallowed error. Returns false
+// when the command is not whitelisted or the shell cannot be spawned.
+function openTerminalCommand(key) {
+  const command = DIAGNOSTIC_COMMANDS[key]
+  if (!command || typeof command !== 'string') return false
+  try {
+    // `start "title" cmd /k ...` opens a fresh cmd window titled "DSH
+    // Diagnostic" that keeps running after the launcher detaches. The explicit
+    // quoted title avoids `start` misreading the first token as a title.
+    spawn('cmd.exe', ['/c', 'start', '"DSH Diagnostic"', 'cmd', '/k', command], {
+      windowsHide: false, stdio: 'ignore',
+    }).unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Copy a string to the system clipboard (via PowerShell, no extra deps).
+function copyToClipboard(text) {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-Command',
+        // UTF-8 via stdin to survive CJK and special chars; [Console]::Out.Write wraps piped stdout, so go through [Windows.Forms] clipboard directly.
+        `$t = [Console]::In.ReadToEnd(); try { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::SetText($t) } catch { [System.IO.File]::WriteAllText("$env:TEMP\\dsh-copy.txt", $t) }`,
+      ], {
+        windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'],
+      })
+      child.stdin.write(text)
+      child.stdin.end()
+      child.on('close', () => resolve(true))
+      child.on('error', () => resolve(false))
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
 // Find the PID(s) listening on `port` (e.g. 3080) via netstat.
 // Returns an array of numeric PIDs; empty when nothing is listening.
 function findPidOnPort(port) {
@@ -446,7 +499,7 @@ async function handleBlockingIssues(checkResult) {
         cancelId: 1,
       })
       if (response === 0) {
-        const ok = await showProgressAndRun('正在安装 DSH …', (onLine) => installDsh(onLine))
+        const ok = await showProgressAndRun('正在安装 DSH …', (onLine) => installDsh(onLine), 'npm install -g @deepseek-ai/dsh')
         if (!ok) {
           await dialog.showMessageBox({
             type: 'error',
@@ -478,7 +531,7 @@ async function handleBlockingIssues(checkResult) {
         // npm rewrites them; launch() restarts a fresh process on the new
         // version afterwards.
         await killServerOnPort(getPortFromUrl(DSH_URL))
-        const ok = await showProgressAndRun('正在更新 DSH …', (onLine) => updateDsh(checkResult.latestVersion, onLine))
+        const ok = await showProgressAndRun('正在更新 DSH …', (onLine) => updateDsh(checkResult.latestVersion, onLine), `npm install -g @deepseek-ai/dsh@${checkResult.latestVersion || 'latest'}`)
         // Re-check the actually installed version to show in the result.
         const after = getDshVersion()
 
@@ -522,7 +575,9 @@ async function handleBlockingIssues(checkResult) {
 
 // Live progress window: shows a spinner + streaming output log (like a
 // terminal) and a clear done/failed state. fn(onOutput) must resolve boolean.
-async function showProgressAndRun(title, fn) {
+// `failureHint` (optional) is a copyable command shown on failure so the user
+// can act from the window instead of reopening a terminal.
+async function showProgressAndRun(title, fn, failureHint) {
   const progressWin = new BrowserWindow({
     width: 520,
     height: 320,
@@ -557,11 +612,20 @@ async function showProgressAndRun(title, fn) {
   </style></head><body>
     <div class="head"><div class="spin" id="spin"></div><div class="t">${title}</div><div class="state" id="state"></div></div>
     <div id="log"></div>
+    ${failureHint ? `<div id="hint" style="display:none;padding:8px 14px;border-top:1px solid #313244;background:#181825;font-size:12px;color:#f9e2af">
+      <div style="margin-bottom:6px">⚠ 失败时的手动操作命令（可复制后到终端执行）：</div>
+      <code style="display:block;padding:6px 8px;background:#11111b;border-radius:4px;white-space:pre-wrap;word-break:break-all">${escapeHtml(failureHint)}</code>
+      <button onclick="copyHint()" style="margin-top:8px;font-family:inherit;font-size:12px;padding:4px 12px;border:1px solid #45475a;border-radius:4px;background:#313244;color:#cdd6f4;cursor:pointer">复制命令</button>
+    </div>` : ''}
     <script>
       const log = document.getElementById('log')
       const state = document.getElementById('state')
       const spin = document.getElementById('spin')
       function append(t){ if(!t) return; log.textContent += t + '\\n'; log.scrollTop = log.scrollHeight }
+      function copyHint(){
+        try { window.dshProgress.copyText(document.querySelector('#hint code').textContent) }
+        catch(e){ append('无法复制命令，请手动复制上方命令。') }
+      }
       window.dshProgress.onLine((t)=>append(t))
       window.dshProgress.onDone((ok)=>{
         spin.classList.add(ok?'ok':'bad')
@@ -571,7 +635,9 @@ async function showProgressAndRun(title, fn) {
           state.textContent = '失败 ✗'
           append('')
           append('⚠ 操作失败，请查看上方日志。')
-          append('窗口保持打开，可复制日志排查或手动安装；关闭窗口后继续。')
+          const h = document.getElementById('hint')
+          if (h) h.style.display = 'block'
+          append('窗口保持打开，可复制日志排查或按上方命令手动操作；关闭窗口后继续。')
         }
       })
     </script>
@@ -610,6 +676,17 @@ async function showProgressAndRun(title, fn) {
 // Force-close a progress window without waiting for graceful close
 function hiddenClose(win) {
   try { win.destroy() } catch { /* already gone */ }
+}
+
+// Escape text for safe embedding inside an HTML attribute/text node (used when
+// interpolating user/log text into inline status pages).
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 // ── Native dialog foreground fixer ──────────────────────────────────
@@ -690,31 +767,96 @@ function createWindow() {
 
   mainWindow.on('closed', () => { mainWindow = null })
 
-  // Visible status pages: waiting (while server boots) and error (after retries)
+  // Visible status pages: waiting (while server boots), error (after retries),
+  // and crash (renderer died). All of them surface real information instead of
+  // a blank white window, and offer copy / open-terminal / retry actions.
   let retryCount = 0
   const maxRetries = 10
 
-  const showStatusPage = (mode) => {
+  // Collapse a Chromium load errorCode into a short human label.
+  const errorLabel = (code) => {
+    const map = {
+      '-102': '连接被拒绝', '-105': '无法解析主机', '-106': '网络已断开',
+      '-109': '地址不可达', '-111': '连接超时', '-118': '连接被重置',
+      '-6': '文件不存在', '-3': '加载被中断', '-2': '加载失败',
+    }
+    return map[String(code)] || `错误码 ${code}`
+  }
+
+  // Build a copyable plain-text summary from a status detail object.
+  const buildDetailText = (detail) => {
+    const lines = []
+    lines.push(`[${new Date().toLocaleString()}]`)
+    if (detail.title) lines.push(`标题: ${detail.title}`)
+    if (detail.mode === 'error') {
+      lines.push(`类型: 页面加载失败`)
+      if (detail.errorLabel) lines.push(`原因: ${detail.errorLabel}`)
+      if (detail.errorCode != null) lines.push(`错误码: ${detail.errorCode}`)
+      if (detail.errorDescription) lines.push(`描述: ${detail.errorDescription}`)
+      if (detail.url) lines.push(`地址: ${detail.url}`)
+    } else if (detail.mode === 'crash') {
+      lines.push(`类型: 渲染进程崩溃`)
+      if (detail.reason) lines.push(`原因: ${detail.reason}`)
+      if (detail.exitCode != null) lines.push(`退出码: ${detail.exitCode}`)
+    }
+    if (detail.extra) lines.push(detail.extra)
+    return lines.join('\n')
+  }
+
+  const showStatusPage = (mode, detail) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
+    const d = detail || {}
     const waiting = mode === 'waiting'
+    const crash = mode === 'crash'
+    const escapedTitle = escapeHtml(d.title || (crash ? '界面崩溃' : '无法连接到 DSH 服务器'))
+    const escapedLabel = escapeHtml(d.errorLabel || (crash ? (d.reason || '') : ''))
+    const escapedDesc = escapeHtml(d.errorDescription || '')
+    const escapedUrl = escapeHtml(d.url || '')
+    // JSON-safe copy of everything, computed for the "复制错误" button.
+    const copyPayload = JSON.stringify(buildDetailText({ ...d, mode }))
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
       *{margin:0;padding:0;box-sizing:border-box}
       body{font-family:Segoe UI,system-ui,sans-serif;height:100vh;display:flex;align-items:center;justify-content:center;
         background:#f5f5f5;color:#333}
-      .card{text-align:center;max-width:420px;padding:32px}
-      ${waiting ? '.spinner{width:36px;height:36px;border:3px solid #d0d0d0;border-top-color:#4a90d9;border-radius:50%;animation:spin .9s linear infinite;margin:0 auto 18px}@keyframes spin{to{transform:rotate(360deg)}}' : '.warn{font-size:44px;margin-bottom:12px}'}
-      h1{font-size:18px;font-weight:600;margin-bottom:8px}
-      p{font-size:13px;color:#666;margin-bottom:20px;line-height:1.5}
-      .buttons{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-      button{font-family:Segoe UI,system-ui,sans-serif;font-size:13px;padding:8px 18px;border:1px solid #ccc;
+      .card{text-align:left;max-width:560px;width:100%;padding:28px 32px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+      .head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+      ${waiting ? '.spinner{width:30px;height:30px;border:3px solid #d0d0d0;border-top-color:#4a90d9;border-radius:50%;animation:spin .9s linear infinite;flex:none}@keyframes spin{to{transform:rotate(360deg)}}'
+        : `.icon{font-size:34px;line-height:1;flex:none}${crash ? '.icon{color:#e07b39}' : '.icon{color:#c0392b}'}`}
+      h1{font-size:17px;font-weight:600;margin:0}
+      p{font-size:13px;color:#666;line-height:1.5;margin:0}
+      .meta{margin-top:12px;padding:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;font-family:Consolas,'Cascadia Mono',monospace;font-size:12px;line-height:1.6;color:#444;white-space:pre-wrap;word-break:break-all}
+      .meta b{color:#222;font-weight:600}
+      .buttons{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}
+      button{font-family:Segoe UI,system-ui,sans-serif;font-size:13px;padding:8px 16px;border:1px solid #ccc;
         border-radius:4px;background:#fff;color:#333;cursor:pointer}
       button.primary{background:#4a90d9;border-color:#4a90d9;color:#fff}
       button:hover{filter:brightness(.97)}
+      #copied{margin-right:auto;font-size:12px;color:#2e9b4f;visibility:hidden;align-self:center}
     </style></head><body><div class="card">
-      ${waiting
-        ? `<div class="spinner"></div><h1>正在等待 DSH 服务器…</h1><p>重试中（${retryCount}/${maxRetries}）<br/>若长时间无响应，可点下方按钮重新检测</p><div class="buttons"><button onclick="retry()">立即重试</button>${'<button onclick="quit()">退出</button>'}</div>`
-        : `<div class="warn">⚠️</div><h1>无法连接到 DSH 服务器</h1><p>DSH WebUI 未能在预期时间内就绪。<br/>请检查 DSH 服务是否已启动后再试。</p><div class="buttons"><button class="primary" onclick="retry()">重新检测</button>${'<button onclick="quit()">退出</button>'}</div>`}
+      <div class="head">
+        ${waiting ? '<div class="spinner"></div>' : `<div class="icon">${crash ? '💥' : '⚠️'}</div>`}
+        <div><h1>${escapedTitle}</h1>${waiting ? `<p>正在等待 DSH 服务器…<br/>重试中（${retryCount}/${maxRetries}）</p>` : `<p>${escapeHtml((crash ? '界面渲染进程意外退出' : 'DSH WebUI 未能成功加载') + '。以下是检测到的错误信息。')}</p>`}</div>
+      </div>
+      ${waiting ? '' : `<div class="meta">
+        ${escapedLabel ? `<div><b>原因</b>: ${escapedLabel}</div>` : ''}
+        ${d.errorCode != null ? `<div><b>错误码</b>: ${escapeHtml(String(d.errorCode))}</div>` : ''}
+        ${crash && d.exitCode != null ? `<div><b>退出码</b>: ${escapeHtml(String(d.exitCode))}</div>` : ''}
+        ${escapedDesc ? `<div><b>描述</b>: ${escapedDesc}</div>` : ''}
+        ${escapedUrl ? `<div><b>地址</b>: ${escapedUrl}</div>` : ''}
+        ${(crash && d.exitCode != null) || d.errorDescription ? '' : '<div>如需排查，可点“打开终端”运行命令查看真实输出。</div>'}
+      </div>`}
+      <div class="buttons">
+        <span id="copied">✓ 已复制</span>
+        ${waiting ? `<button onclick="retry()">立即重试</button>` : (crash ? `<button class="primary" onclick="retry()">重新加载</button>` : `<button class="primary" onclick="retry()">重新检测</button>`)}
+        ${waiting ? '' : '<button onclick="copyErr()">复制错误</button>'}
+        ${waiting ? '' : '<button onclick="openDiag()">打开终端排查</button>'}
+        <button onclick="quit()">退出</button>
+      </div>
     </div><script>
+      const PAYLOAD = '${copyPayload}'
       function retry(){
         if (window.dshDesktop && window.dshDesktop.retry) window.dshDesktop.retry()
         else window.location.reload()
@@ -722,22 +864,63 @@ function createWindow() {
       function quit(){
         if (window.dshDesktop && window.dshDesktop.quit) window.dshDesktop.quit()
       }
+      function copyErr(){
+        try {
+          if (window.dshDesktop && window.dshDesktop.copyText) window.dshDesktop.copyText(PAYLOAD)
+          var c = document.getElementById('copied'); if (c) c.style.visibility = 'visible'
+        } catch(e){}
+      }
+      function openDiag(){
+        if (window.dshDesktop && window.dshDesktop.openDiagnostic) window.dshDesktop.openDiagnostic('dsh-web')
+      }
     </script></body></html>`
     mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
   }
 
-  mainWindow.webContents.on('did-fail-load', (event, errorCode) => {
-    const isConnErr = errorCode === -102 || errorCode === -105
-    if (!isConnErr) return
-    if (retryCount < maxRetries) {
-      retryCount++
-      showStatusPage('waiting')
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(currentServerUrl())
-      }, 2000)
-    } else {
-      showStatusPage('error')
+  // Helper used by the retry IPC: reload the page (remember the current status).
+  const reloadMain = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(currentServerUrl())
+  }
+
+  // Guard against showing the error page for transient interruptions: anything
+  // that isn't a real failure (-3 = ABORTED, e.g. user navigated away) rolls
+  // through the retry ladder first. Every other code is surfaced at the end.
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode === -3) return // aborted / superseded navigation, not a fault
+    retryCount++
+    const detail = {
+      title: '无法连接到 DSH 服务器',
+      errorCode,
+      errorLabel: errorLabel(errorCode),
+      errorDescription: errorDescription || '',
+      url: validatedURL || currentServerUrl(),
     }
+    if (retryCount < maxRetries) {
+      showStatusPage('waiting', detail)
+      setTimeout(reloadMain, 2000)
+    } else {
+      showStatusPage('error', detail)
+    }
+  })
+
+  // Renderer crashed (bad page script / OOM / renderer bug) — show a real
+  // crash page instead of a silent white window.
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    showStatusPage('crash', {
+      title: '界面已崩溃',
+      reason: details.reason || '未知原因',
+      exitCode: details.exitCode != null ? details.exitCode : null,
+    })
+  })
+
+  // Renderer stopped responding — offer a way out instead of a frozen blank UI.
+  mainWindow.webContents.on('unresponsive', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    showStatusPage('crash', { title: '界面无响应', reason: '渲染进程无响应' })
+  })
+
+  mainWindow.webContents.on('responsive', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(currentServerUrl())
   })
 }
 
@@ -754,6 +937,7 @@ function buildMenu() {
         { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => mainWindow?.webContents.reloadIgnoringCache() },
         { label: 'Toggle DevTools', accelerator: 'F12', click: () => mainWindow?.webContents.toggleDevTools() },
         { label: '重启 DSH 服务', click: () => restartDshServer() },
+        { label: '打开终端排查 (dsh web)', click: () => openTerminalCommand('dsh-web') },
         { type: 'separator' },
         { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
       ],
@@ -808,12 +992,14 @@ async function launch() {
   createWindow()
 }
 
-// IPC from the built-in waiting/error status pages
+// IPC from the built-in waiting/error status pages + progress/preload
 ipcMain.on('dsh-desktop:quit', () => app.quit())
 ipcMain.on('dsh-desktop:retry', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.loadURL(currentServerUrl())
 })
+ipcMain.on('dsh-desktop:copy', (_e, text) => { copyToClipboard(String(text || '')) })
+ipcMain.on('dsh-desktop:open-diagnostic', (_e, key) => { openTerminalCommand(key) })
 
 // Constrain the app to a single instance. A slow launch must not spawn extra
 // processes on double-click — each extra window used to watch the same port,

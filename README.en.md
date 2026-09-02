@@ -15,6 +15,9 @@ The shell binds nothing: **no bundled plugins, no extra dependencies, no configu
 ## Features
 
 - Native window with a clean title bar (icon + brand only)
+- **No more blank screens on startup failure**: on a load failure it shows the real cause (reason / error code / description / URL) and offers one-click retry, copy error, open terminal for troubleshooting, and quit
+- **Crash-aware**: a renderer crash or unresponsive UI shows a clear crash page (with exit code) instead of a silent white window
+- **Visible install/update progress**: the progress window streams output live like a terminal, and on failure gives a copyable manual command
 - Automatic retry if the DSH server isn't ready yet
 - **Native picker raised to the front**: the Windows "Select Workspace Directory" dialog, which DSH opens from a background process, is automatically brought to the foreground, centered over the main window and adopted as its owned dialog — no more hiding behind the interface
 - External links open in your system browser
