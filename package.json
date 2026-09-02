@@ -1,14 +1,14 @@
 {
   "name": "dsh-desktop-shell",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "DSH Desktop Shell - A native launcher for the DSH WebUI",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build": "electron-builder --win",
-    "build:portable": "electron-builder --win portable",
-    "build:nsis": "electron-builder --win nsis"
+    "build": "electron-builder --win --publish never",
+    "build:portable": "electron-builder --win portable --publish never",
+    "build:nsis": "electron-builder --win nsis --publish never"
   },
   "author": "DSH",
   "license": "MIT",
@@ -51,14 +51,23 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "DSH Desktop",
+      "artifactName": "DSH-Desktop-${version}-${arch}.${ext}",
       "installerLanguages": [
         "zh_CN",
         "en_US"
       ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "buhuikongpan",
+      "repo": "dsh-desktop"
     }
   },
   "allowScripts": {
     "electron@33.4.11": true,
     "electron-winstaller@5.4.0": true
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

@@ -25,6 +25,7 @@ The shell binds nothing: **no bundled plugins, no extra dependencies, no configu
 - Zoom: `Ctrl+` / `Ctrl-`
 - **Single-instance**: launching again just focuses the existing window, never re-spawning the shared DSH service
 - Only stops the DSH server **it spawned itself** — never force-kills a server another instance or an external process is using
+- **Auto-update (packaged build)**: checks GitHub Releases for a new version in the background at startup and can download it with one click; the menu "Check for updates" triggers a manual check (disabled in dev mode)
 
 ## Quick Start
 
@@ -62,10 +63,12 @@ Launches the app with DevTools open for debugging.
 ## Build
 
 ```bash
-npm run build        # NSIS installer (win x64)
+npm run build        # NSIS installer (win x64), does not publish
 npm run build:portable
 npm run build:nsis
 ```
+
+The installer is named `DSH Desktop-<version>-x64.exe` (matching the GitHub Release asset name so auto-update can find it).
 
 ## License
 

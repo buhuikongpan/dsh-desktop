@@ -25,6 +25,7 @@
 - 缩放：`Ctrl+` / `Ctrl-`
 - **单实例**：再次启动只会聚焦已有窗口，不会重复拉起共享的 DSH 服务
 - 只停止**本实例自己**拉起的 DSH 服务器；绝不强杀其它实例或外部进程正在使用的服务器
+- **自动更新（打包版）**：启动后在后台检查 GitHub Release 新版本，发现更新可一键下载；菜单「检查更新」可手动触发（开发模式不启用）
 
 ## 快速开始
 
@@ -62,10 +63,12 @@ npm run dev
 ## 构建
 
 ```bash
-npm run build        # NSIS 安装包 (win x64)
+npm run build        # NSIS 安装包 (win x64)，不上传
 npm run build:portable
 npm run build:nsis
 ```
+
+安装包命名为 `DSH Desktop-<版本>-x64.exe`（与 GitHub Release 资产名一致，供自动更新识别）。
 
 ## 许可证
 

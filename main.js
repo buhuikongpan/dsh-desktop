@@ -1,4 +1,5 @@
 const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const { execSync, exec, spawn } = require('child_process')
 const path = require('path')
 const http = require('http')
@@ -924,6 +925,95 @@ function createWindow() {
   })
 }
 
+// ── Auto-update (electron-updater) ──────────────────────────────────
+
+// Ask the user something via a message box attached to the main window (or a
+// standalone dialog if no window is open yet). Returns the chosen index.
+function askBox(message, detail, buttons) {
+  const opts = { type: 'info', title: 'DSH Desktop', message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 }
+  return dialog.showMessageBox(mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined, opts)
+}
+
+let updateDialogOpen = false
+
+// Wire up the auto-updater. Only runs in a packaged app — in development the
+// updater has no `latest.yml` to read and `checkForUpdates()` throws, so we
+// skip it there. Updates are checked in the background and surfaced through
+// native dialogs; we never block startup on the network.
+function initAutoUpdater() {
+  if (!app.isPackaged) return
+
+  autoUpdater.autoDownload = false   // ask the user before downloading
+  autoUpdater.autoInstallOnAppQuit = true
+  // Quiet logger: keep electron-builder's verbose console output out of the
+  // UI, but still surface real errors. electron-updater calls these methods
+  // (optionally) — provide a minimal implementation so no null access occurs.
+  autoUpdater.logger = {
+    info: () => {},
+    warn: () => {},
+    debug: () => {},
+    error: (msg) => console.error('[update]', msg),
+  }
+
+  autoUpdater.on('update-available', async (info) => {
+    if (updateDialogOpen) { autoUpdater.downloadUpdate(); return }
+    updateDialogOpen = true
+    try {
+      const { response } = await askBox(
+        `发现新版本 ${info.version}（当前 ${app.getVersion()}）`,
+        '是否立即下载并安装？',
+        ['立即下载', '稍后'],
+      )
+      if (response === 0) autoUpdater.downloadUpdate()
+    } finally {
+      updateDialogOpen = false
+    }
+  })
+
+  autoUpdater.on('download-progress', (p) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const pct = Math.round(p.percent || 0)
+    mainWindow.setProgressBar(pct / 100)
+  })
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1)
+    const { response } = await askBox(
+      `新版本 ${info.version} 已下载完毕`,
+      '重启应用即可完成安装。是否立即重启？',
+      ['立即重启', '退出时安装'],
+    )
+    if (response === 0) autoUpdater.quitAndInstall(false, true)
+  })
+
+  autoUpdater.on('update-not-available', async () => {
+    // Only tell the user when they explicitly asked (menu '检查更新').
+    if (autoUpdater.__manualCheck) {
+      await askBox('已是最新版本', `当前版本 ${app.getVersion()}，无需更新。`, ['好的'])
+    }
+  })
+
+  autoUpdater.on('error', async (err) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1)
+    if (autoUpdater.__manualCheck) {
+      await askBox('检查更新失败', `无法获取更新信息。\n${err && err.message ? err.message : String(err)}`, ['好的'])
+    }
+    // silent on automatic check — a network hiccup shouldn't bother the user
+  })
+
+  // Manual check from the menu / IPC: remember for the next event, then run.
+  autoUpdater.__manualCheck = false
+}
+
+function checkForUpdates(manual) {
+  if (!app.isPackaged) {
+    if (manual) askBox('开发模式', '开发模式下不检查更新。仅打包后的应用支持自动更新。', ['好的'])
+    return
+  }
+  autoUpdater.__manualCheck = !!manual
+  autoUpdater.checkForUpdates().catch(() => { /* network/offline errors are handled by the 'error' event */ })
+}
+
 // ── Menu ────────────────────────────────────────────────────────────
 
 function buildMenu() {
@@ -938,6 +1028,8 @@ function buildMenu() {
         { label: 'Toggle DevTools', accelerator: 'F12', click: () => mainWindow?.webContents.toggleDevTools() },
         { label: '重启 DSH 服务', click: () => restartDshServer() },
         { label: '打开终端排查 (dsh web)', click: () => openTerminalCommand('dsh-web') },
+        { type: 'separator' },
+        { label: '检查更新', click: () => checkForUpdates(true) },
         { type: 'separator' },
         { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
       ],
@@ -1019,7 +1111,12 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     buildMenu()
+    initAutoUpdater()
     await launch()
+
+    // Background auto-update check a few seconds after startup; never blocks
+    // the window from opening.
+    setTimeout(() => checkForUpdates(false), 8000)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
